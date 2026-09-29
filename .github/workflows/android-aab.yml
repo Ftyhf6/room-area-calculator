@@ -1,0 +1,123 @@
+name: Build Android AAB
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/android-aab.yml"
+      - "mqys-lmtr-lmrbaa-llGrf.zip"
+
+jobs:
+  build-aab:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android platform and build tools
+        run: |
+          sdkmanager "platforms;android-36" "build-tools;36.0.0"
+          yes | sdkmanager --licenses >/dev/null || true
+
+      - name: Extract web application
+        run: |
+          rm -rf web extracted
+          mkdir -p web extracted
+          unzip -q mqys-lmtr-lmrbaa-llGrf.zip -d extracted
+          INDEX="$(find extracted -type f -name index.html | head -n 1)"
+          if [ -z "$INDEX" ]; then
+            echo "index.html was not found in the supplied ZIP."
+            find extracted -maxdepth 3 -type f | head -100
+            exit 1
+          fi
+          ROOT="$(dirname "$INDEX")"
+          cp -a "$ROOT"/. web/
+          test -f web/index.html
+
+      - name: Create Capacitor Android wrapper
+        run: |
+          cat > package.json <<'EOF'
+          {
+            "name": "room-area-calculator-android",
+            "private": true,
+            "scripts": {
+              "cap:add": "cap add android",
+              "cap:sync": "cap sync android"
+            },
+            "dependencies": {
+              "@capacitor/core": "^7.4.0"
+            },
+            "devDependencies": {
+              "@capacitor/cli": "^7.4.0",
+              "@capacitor/android": "^7.4.0"
+            }
+          }
+          EOF
+
+          cat > capacitor.config.ts <<'EOF'
+          import type { CapacitorConfig } from '@capacitor/cli';
+
+          const config: CapacitorConfig = {
+            appId: 'com.aljalal.roommeasure',
+            appName: 'مقياس المتر المربع للغرف',
+            webDir: 'web',
+            bundledWebRuntime: false
+          };
+
+          export default config;
+          EOF
+
+          npm install
+          npx cap add android
+
+      - name: Configure Android SDK targets and camera permission
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path("android/variables.gradle")
+          if p.exists():
+              s=p.read_text()
+              import re
+              s=re.sub(r'compileSdkVersion\s*=\s*\d+', 'compileSdkVersion = 36', s)
+              s=re.sub(r'targetSdkVersion\s*=\s*\d+', 'targetSdkVersion = 36', s)
+              s=re.sub(r'minSdkVersion\s*=\s*\d+', 'minSdkVersion = 23', s)
+              p.write_text(s)
+          m=Path("android/app/src/main/AndroidManifest.xml")
+          s=m.read_text()
+          if 'android.permission.CAMERA' not in s:
+              s=s.replace('<manifest', '<manifest\\n    xmlns:android="http://schemas.android.com/apk/res/android"', 1)
+              s=s.replace('xmlns:android="http://schemas.android.com/apk/res/android" xmlns:android="http://schemas.android.com/apk/res/android"', 'xmlns:android="http://schemas.android.com/apk/res/android"')
+              s=s.replace('>', '>\\n    <uses-permission android:name="android.permission.CAMERA" />', 1)
+          m.write_text(s)
+          PY
+          npx cap sync android
+
+      - name: Build release AAB
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew bundleRelease --no-daemon
+
+      - name: Upload AAB artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: room-area-calculator-aab
+          path: android/app/build/outputs/bundle/release/*.aab
+          if-no-files-found: error
