@@ -71,7 +71,8 @@ jobs:
             },
             "devDependencies": {
               "@capacitor/cli": "^7.4.0",
-              "@capacitor/android": "^7.4.0"
+              "@capacitor/android": "^7.4.0",
+              "typescript": "^5.9.2"
             }
           }
           EOF
@@ -107,8 +108,8 @@ jobs:
           m=Path("android/app/src/main/AndroidManifest.xml")
           s=m.read_text()
           if 'android.permission.CAMERA' not in s:
-              s=s.replace('<manifest', '<manifest\n    xmlns:android="http://schemas.android.com/apk/res/android"', 1)
-              s=s.replace('xmlns:android="http://schemas.android.com/apk/res/android" xmlns:android="http://schemas.android.com/apk/res/android"', 'xmlns:android="http://schemas.android.com/apk/res/android"')
+              if 'xmlns:android=' not in s.split('>',1)[0]:
+                  s=s.replace('<manifest', '<manifest xmlns:android="http://schemas.android.com/apk/res/android"', 1)
               s=s.replace('>', '>\n    <uses-permission android:name="android.permission.CAMERA" />', 1)
           m.write_text(s)
           PY
@@ -119,6 +120,11 @@ jobs:
           cd android
           chmod +x gradlew
           ./gradlew bundleRelease --no-daemon
+
+      - name: Verify AAB
+        run: |
+          ls -lh android/app/build/outputs/bundle/release/*.aab
+          test -s android/app/build/outputs/bundle/release/*.aab
 
       - name: Upload AAB artifact
         uses: actions/upload-artifact@v4
