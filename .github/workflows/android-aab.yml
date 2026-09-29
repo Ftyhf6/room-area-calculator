@@ -1,5 +1,6 @@
 name: Build Android AAB
 # Build verification trigger
+# Java 21 is required by Capacitor Android 7
 
 on:
   workflow_dispatch:
